@@ -1,0 +1,15 @@
+# Go
+go-core/tinder-core
+go-core/*.exe
+
+# Python
+python-analytics/.venv/
+python-analytics/**/__pycache__/
+python-analytics/*.egg-info/
+
+# env
+.env
+*/.env
+
+# OS
+.DS_Store

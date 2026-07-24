@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tinder
+      POSTGRES_USER: tinder
+      POSTGRES_PASSWORD: tinder
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./go-core/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tinder"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ch_data:/var/lib/clickhouse
+      - ./clickhouse/init:/docker-entrypoint-initdb.d
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  go-core:
+    build: ./go-core
+    ports:
+      - "8080:8080"
+    environment:
+      APP_ENV: docker
+      HTTP_PORT: 8080
+      POSTGRES_DSN: postgres://tinder:tinder@postgres:5432/tinder?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_EVENTS_STREAM: tinder:events
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  python-analytics:
+    build: ./python-analytics
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      REDIS_STREAM: tinder:events
+      REDIS_CONSUMER_GROUP: analytics
+      REDIS_CONSUMER_NAME: analytics-1
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: analytics
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+
+volumes:
+  pg_data:
+  ch_data:
