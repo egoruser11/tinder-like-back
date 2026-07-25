@@ -9,6 +9,8 @@ type Config struct {
 	RedisAddr     string
 	RedisStream   string
 	PublisherPool int
+	JWTSigningKey string
+	JWTIssuer     string
 }
 
 func Load() Config {
@@ -19,6 +21,8 @@ func Load() Config {
 		RedisAddr:     getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisStream:   getEnv("REDIS_EVENTS_STREAM", "tinder:events"),
 		PublisherPool: 4,
+		JWTSigningKey: os.Getenv("JWT_SIGNING_KEY"),
+		JWTIssuer:     getEnv("JWT_ISSUER", "tinder-core"),
 	}
 }
 

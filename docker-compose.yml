@@ -49,6 +49,10 @@ services:
       POSTGRES_DSN: postgres://tinder:tinder@postgres:5432/tinder?sslmode=disable
       REDIS_ADDR: redis:6379
       REDIS_EVENTS_STREAM: tinder:events
+      # Local-only fallback. Set JWT_SIGNING_KEY in the shell or .env file for
+      # a non-default value; production must provide its own secret.
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-local-development-key-change-before-production-2026}
+      JWT_ISSUER: tinder-core
     depends_on:
       postgres:
         condition: service_healthy

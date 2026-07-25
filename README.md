@@ -112,6 +112,32 @@ docker compose up --build
 Локальная разработка без Docker: смотри `go-core/.env.example` и
 `python-analytics/.env.example`.
 
+## Авторизация
+
+Авторизация реализована через `github.com/meysam81/go-auth` и использует
+существующую таблицу `users`: пароль хранится только как bcrypt-хеш в
+`users.password_hash`. Дополнительные таблицы для текущего режима не нужны,
+потому что сервис выдаёт только короткоживущий access JWT (15 минут). Таблица
+для refresh-токенов понадобится только при добавлении logout/refresh/revocation.
+
+| Маршрут | Назначение |
+| --- | --- |
+| `POST /api/v1/auth/register` | Создать пользователя и вернуть access token |
+| `POST /api/v1/auth/login` | Проверить email и пароль, вернуть access token |
+| `GET /api/v1/auth/me` | Проверить работу защищённого маршрута |
+
+Тело register/login: `{"email":"user@example.com","password":"минимум 8 символов"}`.
+Для защищённого маршрута передайте `Authorization: Bearer <access_token>`.
+
+`internal/transport/http/middleware.RequireJWT` использует middleware из
+`go-auth`, проверяет токен и кладёт в Gin context `user_id` (`int64`) и
+`user_email` (`string`). Поэтому handler не читает заголовок и не валидирует
+JWT самостоятельно: например, `userID := c.GetInt64("user_id")`.
+
+`JWT_SIGNING_KEY` обязателен и должен быть не короче 32 символов. В
+`docker-compose.yml` есть локальное development-значение; перед любым
+развёртыванием его нужно заменить через переменную окружения.
+
 ## Первые 10 тикетов / First 10 tickets
 
 Тикеты рассчитаны так, чтобы вы писали бизнес-логику сами — инфраструктура
