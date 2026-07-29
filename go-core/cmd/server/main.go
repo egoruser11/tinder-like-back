@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -13,8 +14,11 @@ import (
 
 	"tinder-core/internal/config"
 	"tinder-core/internal/events"
+	"tinder-core/internal/platform/logging"
+	"tinder-core/internal/platform/objectstorage"
 	"tinder-core/internal/platform/postgres"
 	"tinder-core/internal/platform/redis"
+	"tinder-core/internal/repository"
 	httptransport "tinder-core/internal/transport/http"
 )
 
@@ -23,23 +27,30 @@ func main() {
 	defer stop()
 
 	cfg := config.Load()
+	logger := logging.New(cfg.Env, cfg.LogLevel)
+	slog.SetDefault(logger)
+
 	if len(cfg.JWTSigningKey) < 32 {
-		log.Fatal("JWT_SIGNING_KEY must contain at least 32 characters")
+		logger.Error("invalid configuration", "error", "JWT_SIGNING_KEY must contain at least 32 characters")
+		os.Exit(1)
 	}
 
 	db, err := postgres.New(cfg.PostgresDSN)
 	if err != nil {
-		log.Fatalf("postgres: %v", err)
+		logger.Error("connect to Postgres", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
-	authStore := postgres.NewAuthStore(db)
+	userRepository := repository.NewUserRepository(db)
+	authStore := postgres.NewAuthStore(db, userRepository)
 	authenticator, err := basic.NewAuthenticator(basic.Config{
 		UserStore:       authStore,
 		CredentialStore: authStore,
 	})
 	if err != nil {
-		log.Fatalf("authenticator: %v", err)
+		logger.Error("create authenticator", "error", err)
+		os.Exit(1)
 	}
 
 	tokenManager, err := authjwt.NewTokenManager(authjwt.Config{
@@ -49,12 +60,30 @@ func main() {
 		AccessTokenTTL: 15 * time.Minute,
 	})
 	if err != nil {
-		log.Fatalf("token manager: %v", err)
+		logger.Error("create token manager", "error", err)
+		os.Exit(1)
 	}
+
+	storageCtx, cancelStorage := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelStorage()
+	photoStorage, err := objectstorage.New(
+		storageCtx,
+		cfg.StorageEndpoint,
+		cfg.StorageAccessKey,
+		cfg.StorageSecretKey,
+		cfg.StorageBucket,
+		cfg.StorageUseSSL,
+	)
+	if err != nil {
+		logger.Error("initialize photo storage", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("photo storage ready", "bucket", photoStorage.Bucket())
 
 	redisClient, err := redis.New(cfg.RedisAddr)
 	if err != nil {
-		log.Fatalf("redis: %v", err)
+		logger.Error("connect to Redis", "error", err)
+		os.Exit(1)
 	}
 	defer redisClient.Close()
 
@@ -66,6 +95,7 @@ func main() {
 		Publisher:     publisher,
 		Authenticator: authenticator,
 		TokenManager:  tokenManager,
+		Logger:        logger,
 	})
 
 	srv := &http.Server{
@@ -74,19 +104,20 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("tinder-core listening on :%s", cfg.HTTPPort)
+		logger.Info("tinder-core listening", "port", cfg.HTTPPort)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http server: %v", err)
+			logger.Error("http server stopped unexpectedly", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down...")
+	logger.Info("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("http shutdown: %v", err)
+		logger.Error("http shutdown", "error", err)
 	}
 }

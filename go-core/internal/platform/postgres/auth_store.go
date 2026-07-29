@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/meysam81/go-auth/storage"
+
+	"tinder-core/internal/repository"
 )
 
 var errUnsupportedAuthStorage = errors.New("auth storage operation is not configured")
@@ -18,26 +20,21 @@ var errUnsupportedAuthStorage = errors.New("auth storage operation is not config
 // Password hashes are kept in users.password_hash; no additional table is
 // required while the application only issues access tokens.
 type AuthStore struct {
-	db *pgxpool.Pool
+	db    *pgxpool.Pool
+	users *repository.UserRepository
 }
 
 var _ storage.UserStore = (*AuthStore)(nil)
 var _ storage.CredentialStore = (*AuthStore)(nil)
 
-func NewAuthStore(db *pgxpool.Pool) *AuthStore {
-	return &AuthStore{db: db}
+func NewAuthStore(db *pgxpool.Pool, users *repository.UserRepository) *AuthStore {
+	return &AuthStore{db: db, users: users}
 }
 
 func (s *AuthStore) CreateUser(ctx context.Context, user *storage.User) error {
-	var id int64
-	var createdAt time.Time
-	err := s.db.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash)
-		VALUES ($1, '')
-		RETURNING id, created_at
-	`, user.Email).Scan(&id, &createdAt)
+	createdUser, err := s.users.Create(ctx, user.Email, "")
 	if err != nil {
-		if isUniqueViolation(err) {
+		if errors.Is(err, repository.ErrUserAlreadyExists) {
 			return storage.ErrAlreadyExists
 		}
 		return err
@@ -46,9 +43,9 @@ func (s *AuthStore) CreateUser(ctx context.Context, user *storage.User) error {
 	// basic.Authenticator stores the password hash immediately after this call.
 	// It passes the same user pointer, so replace its temporary generated ID with
 	// the BIGSERIAL identifier returned by Postgres.
-	user.ID = strconv.FormatInt(id, 10)
+	user.ID = strconv.FormatInt(createdUser.ID, 10)
 	user.Provider = "basic"
-	user.CreatedAt = createdAt
+	user.CreatedAt = createdUser.CreatedAt
 	return nil
 }
 

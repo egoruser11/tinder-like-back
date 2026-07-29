@@ -1,6 +1,8 @@
 package http
 
 import (
+	"log/slog"
+
 	"github.com/gin-gonic/gin"
 	"github.com/meysam81/go-auth/auth/basic"
 	authjwt "github.com/meysam81/go-auth/auth/jwt"
@@ -14,13 +16,14 @@ type Deps struct {
 	Publisher     *events.Publisher
 	Authenticator *basic.Authenticator
 	TokenManager  *authjwt.TokenManager
+	Logger        *slog.Logger
 }
 
 func NewRouter(deps Deps) *gin.Engine {
 	r := gin.Default()
 
 	r.GET("/health", handlers.Health)
-	authHandler := handlers.NewAuthHandler(deps.Authenticator, deps.TokenManager)
+	authHandler := handlers.NewAuthHandler(deps.Authenticator, deps.TokenManager, deps.Logger)
 
 	v1 := r.Group("/api/v1")
 	{

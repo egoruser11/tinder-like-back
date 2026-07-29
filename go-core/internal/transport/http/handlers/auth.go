@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,12 +18,14 @@ import (
 type AuthHandler struct {
 	authenticator *basic.Authenticator
 	tokenManager  *authjwt.TokenManager
+	logger        *slog.Logger
 }
 
-func NewAuthHandler(authenticator *basic.Authenticator, tokenManager *authjwt.TokenManager) *AuthHandler {
+func NewAuthHandler(authenticator *basic.Authenticator, tokenManager *authjwt.TokenManager, logger *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		authenticator: authenticator,
 		tokenManager:  tokenManager,
+		logger:        logger,
 	}
 }
 
@@ -70,6 +73,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	h.logger.Info("user registered", "user_id", user.ID)
 	h.respondWithAccessToken(c, http.StatusCreated, user)
 }
 
@@ -87,6 +91,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	)
 	if err != nil {
 		if errors.Is(err, basic.ErrInvalidCredentials) {
+			h.logger.Warn("login failed", "reason", "invalid_credentials")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
 			return
 		}
@@ -94,6 +99,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	h.logger.Info("user logged in", "user_id", user.ID)
 	h.respondWithAccessToken(c, http.StatusOK, user)
 }
 
