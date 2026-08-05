@@ -17,23 +17,33 @@ type Deps struct {
 	Authenticator *basic.Authenticator
 	TokenManager  *authjwt.TokenManager
 	Logger        *slog.Logger
+	AuthHandler   *handlers.AuthHandler
+	RibbonHandler *handlers.RibbonHandler
 }
 
 func NewRouter(deps Deps) *gin.Engine {
 	r := gin.Default()
 
 	r.GET("/health", handlers.Health)
-	authHandler := handlers.NewAuthHandler(deps.Authenticator, deps.TokenManager, deps.Logger)
 
 	v1 := r.Group("/api/v1")
 	{
 		auth := v1.Group("/auth")
-		auth.POST("/register", authHandler.Register)
-		auth.POST("/login", authHandler.Login)
+		auth.POST("/register", deps.AuthHandler.Register)
+		auth.POST("/login", deps.AuthHandler.Login)
 
 		protected := v1.Group("")
 		protected.Use(transportmiddleware.RequireJWT(deps.TokenManager))
-		protected.GET("/auth/me", authHandler.Me)
+		protected.GET("/auth/me", deps.AuthHandler.Me)
+
+		ribbon := protected.Group("/ribbon")
+		ribbon.GET("", deps.RibbonHandler.Feed)
+		ribbon.GET("/likes", deps.RibbonHandler.IncomingLikes)
+		ribbon.POST("/likes", deps.RibbonHandler.Like)
+		ribbon.POST("/dislikes", deps.RibbonHandler.Dislike)
+		ribbon.POST("/blocks", deps.RibbonHandler.Block)
+		ribbon.DELETE("/blocks", deps.RibbonHandler.Unblock)
+		ribbon.POST("/reports", deps.RibbonHandler.Report)
 
 		profiles := v1.Group("/profiles")
 		_ = profiles // TODO(ticket-4): GET/PUT /profiles/me, POST /profiles/me/photos

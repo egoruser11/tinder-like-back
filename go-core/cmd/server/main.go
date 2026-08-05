@@ -19,7 +19,9 @@ import (
 	"tinder-core/internal/platform/postgres"
 	"tinder-core/internal/platform/redis"
 	"tinder-core/internal/repository"
+	"tinder-core/internal/service"
 	httptransport "tinder-core/internal/transport/http"
+	"tinder-core/internal/transport/http/handlers"
 )
 
 func main() {
@@ -42,7 +44,16 @@ func main() {
 	}
 	defer db.Close()
 
+	if err := postgres.ApplyMigrations(ctx, db); err != nil {
+		logger.Error("apply database migrations", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("database migrations are up to date")
+
 	userRepository := repository.NewUserRepository(db)
+	profileRepository := repository.NewProfileRepository(db)
+	ribbonRepository := repository.NewRibbonRepository(db)
+	ribbonService := service.NewRibbonService(ribbonRepository, profileRepository, logger)
 	authStore := postgres.NewAuthStore(db, userRepository)
 	authenticator, err := basic.NewAuthenticator(basic.Config{
 		UserStore:       authStore,
@@ -52,7 +63,6 @@ func main() {
 		logger.Error("create authenticator", "error", err)
 		os.Exit(1)
 	}
-
 	tokenManager, err := authjwt.NewTokenManager(authjwt.Config{
 		UserStore:      authStore,
 		SigningKey:     []byte(cfg.JWTSigningKey),
@@ -63,6 +73,8 @@ func main() {
 		logger.Error("create token manager", "error", err)
 		os.Exit(1)
 	}
+	authHandler := handlers.NewAuthHandler(authenticator, tokenManager, logger)
+	ribbonHandler := handlers.NewRibbonHandler(ribbonService, ribbonRepository)
 
 	storageCtx, cancelStorage := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelStorage()
@@ -96,6 +108,8 @@ func main() {
 		Authenticator: authenticator,
 		TokenManager:  tokenManager,
 		Logger:        logger,
+		AuthHandler:   authHandler,
+		RibbonHandler: ribbonHandler,
 	})
 
 	srv := &http.Server{
