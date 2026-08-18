@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"math"
 
 	"tinder-core/internal/repository"
 )
@@ -91,16 +90,4 @@ func (s *RibbonService) Unblock(context.Context, int64, TargetInput) error {
 // Report will store a complaint and later publish an analytics/moderation event.
 func (s *RibbonService) Report(context.Context, int64, ReportInput) error {
 	return ErrNotImplemented
-}
-
-func calculateMinAndMaxLonLat(userLat float64, userLon float64) (float64, float64, float64, float64) {
-	latDelta := 100 / 111.32
-	minLat := userLat - latDelta
-	maxLat := userLat + latDelta
-	cosLatitudeRad := math.Cos(userLat * math.Pi / 180.0)
-	kilometersPerLongitudeDegree := 111.32 * cosLatitudeRad
-	lonDelta := 100 / kilometersPerLongitudeDegree
-	minLon := minLat - lonDelta
-	maxLon := maxLat + lonDelta
-	return minLon, maxLon, minLat, maxLat
 }
