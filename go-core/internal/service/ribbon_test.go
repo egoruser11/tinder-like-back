@@ -63,11 +63,69 @@ func TestGetFeed_RejectsInvalidCursor(t *testing.T) {
 	}
 }
 
+func TestLike_ReturnsMatchWhenRepositoryCreatesChat(t *testing.T) {
+	chatID := int64(42)
+	store := &fakeRibbonStore{likeChatID: &chatID}
+	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+
+	output, err := service.Like(context.Background(), 1, TargetInput{TargetUserID: 2})
+	if err != nil {
+		t.Fatalf("Like returned error: %v", err)
+	}
+	if !output.Matched || output.ChatID == nil || *output.ChatID != chatID {
+		t.Fatalf("unexpected like output: %#v", output)
+	}
+	if store.likedActorID != 1 || store.likedTargetID != 2 {
+		t.Fatalf("repository called with %d -> %d, want 1 -> 2", store.likedActorID, store.likedTargetID)
+	}
+}
+
+func TestRibbonActions_RejectSelfTargetBeforeRepository(t *testing.T) {
+	store := &fakeRibbonStore{}
+	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+
+	_, err := service.Like(context.Background(), 1, TargetInput{TargetUserID: 1})
+	if !errors.Is(err, ErrInvalidTargetUser) {
+		t.Fatalf("error = %v, want ErrInvalidTargetUser", err)
+	}
+	if store.likedTargetID != 0 {
+		t.Fatal("repository must not be called for an invalid target")
+	}
+}
+
+func TestReport_ValidatesAndTrimsComment(t *testing.T) {
+	store := &fakeRibbonStore{}
+	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+
+	err := service.Report(context.Background(), 1, ReportInput{
+		TargetUserID: 2,
+		Reason:       2,
+		Comment:      "  spam links  ",
+	})
+	if err != nil {
+		t.Fatalf("Report returned error: %v", err)
+	}
+	if store.reportReason != 2 || store.reportComment == nil || *store.reportComment != "spam links" {
+		t.Fatalf("unexpected report captured by repository: reason=%d comment=%v", store.reportReason, store.reportComment)
+	}
+
+	err = service.Report(context.Background(), 1, ReportInput{TargetUserID: 2, Reason: 6})
+	if !errors.Is(err, ErrInvalidReportReason) {
+		t.Fatalf("error = %v, want ErrInvalidReportReason", err)
+	}
+}
+
 type fakeRibbonStore struct {
 	filters          *models.DiscoveryPreferences
 	filtersErr       error
 	candidateBatches [][]models.DiscoveryCandidate
 	queries          []repository.CandidateQuery
+	incomingLikes    []models.DiscoveryCandidate
+	likeChatID       *int64
+	likedActorID     int64
+	likedTargetID    int64
+	reportReason     int16
+	reportComment    *string
 }
 
 func (s *fakeRibbonStore) GetFilters(context.Context, int64) (*models.DiscoveryPreferences, error) {
@@ -82,6 +140,28 @@ func (s *fakeRibbonStore) ListCandidates(_ context.Context, query repository.Can
 	batch := s.candidateBatches[0]
 	s.candidateBatches = s.candidateBatches[1:]
 	return batch, nil
+}
+
+func (s *fakeRibbonStore) ListIncomingLikes(context.Context, int64, int64, int) ([]models.DiscoveryCandidate, error) {
+	return s.incomingLikes, nil
+}
+
+func (s *fakeRibbonStore) CreateLike(_ context.Context, actorUserID, targetUserID int64) (*int64, error) {
+	s.likedActorID = actorUserID
+	s.likedTargetID = targetUserID
+	return s.likeChatID, nil
+}
+
+func (s *fakeRibbonStore) CreateDislike(context.Context, int64, int64) error { return nil }
+
+func (s *fakeRibbonStore) CreateBlock(context.Context, int64, int64) error { return nil }
+
+func (s *fakeRibbonStore) RemoveBlock(context.Context, int64, int64) error { return nil }
+
+func (s *fakeRibbonStore) CreateReport(_ context.Context, _ int64, _ int64, reason int16, comment *string) error {
+	s.reportReason = reason
+	s.reportComment = comment
+	return nil
 }
 
 type fakeProfileStore struct {

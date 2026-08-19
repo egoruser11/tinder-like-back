@@ -33,7 +33,11 @@ func (h *RibbonHandler) Feed(c *gin.Context) {
 }
 
 func (h *RibbonHandler) IncomingLikes(c *gin.Context) {
-	result, err := h.service.GetIncomingLikes(c.Request.Context(), currentUserID(c))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	result, err := h.service.GetIncomingLikes(c.Request.Context(), currentUserID(c), service.FeedInput{
+		Limit:  limit,
+		Cursor: c.Query("cursor"),
+	})
 	h.respond(c, result, err)
 }
 
@@ -42,7 +46,8 @@ func (h *RibbonHandler) Like(c *gin.Context) {
 	if !bindJSON(c, &input) {
 		return
 	}
-	h.respond(c, nil, h.service.Like(c.Request.Context(), currentUserID(c), input))
+	result, err := h.service.Like(c.Request.Context(), currentUserID(c), input)
+	h.respond(c, result, err)
 }
 
 func (h *RibbonHandler) Dislike(c *gin.Context) {
@@ -90,11 +95,26 @@ func bindJSON(c *gin.Context, value any) bool {
 }
 
 func (h *RibbonHandler) respond(c *gin.Context, result any, err error) {
-	if errors.Is(err, service.ErrNotImplemented) {
+	switch {
+	case errors.Is(err, service.ErrNotImplemented):
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "ribbon algorithm is not implemented yet"})
 		return
-	}
-	if err != nil {
+	case errors.Is(err, service.ErrInvalidFeedCursor),
+		errors.Is(err, service.ErrInvalidFeedLimit),
+		errors.Is(err, service.ErrInvalidTargetUser),
+		errors.Is(err, service.ErrInvalidReportReason),
+		errors.Is(err, service.ErrReportCommentTooLong):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	case errors.Is(err, repository.ErrTargetUserNotFound), errors.Is(err, repository.ErrProfileNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	case errors.Is(err, repository.ErrDiscoveryPreferencesNotFound),
+		errors.Is(err, service.ErrProfileCoordinatesRequired),
+		errors.Is(err, repository.ErrUsersExcluded):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	case err != nil:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "ribbon operation failed"})
 		return
 	}

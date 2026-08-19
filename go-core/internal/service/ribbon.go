@@ -17,7 +17,11 @@ import (
 var (
 	ErrNotImplemented             = errors.New("ribbon operation is not implemented")
 	ErrInvalidFeedCursor          = errors.New("invalid feed cursor")
+	ErrInvalidFeedLimit           = errors.New("invalid feed limit")
 	ErrProfileCoordinatesRequired = errors.New("profile coordinates are required")
+	ErrInvalidTargetUser          = errors.New("invalid target user")
+	ErrInvalidReportReason        = errors.New("invalid report reason")
+	ErrReportCommentTooLong       = errors.New("report comment is too long")
 )
 
 const (
@@ -29,6 +33,12 @@ const (
 type ribbonStore interface {
 	GetFilters(context.Context, int64) (*models.DiscoveryPreferences, error)
 	ListCandidates(context.Context, repository.CandidateQuery) ([]models.DiscoveryCandidate, error)
+	ListIncomingLikes(context.Context, int64, int64, int) ([]models.DiscoveryCandidate, error)
+	CreateLike(context.Context, int64, int64) (*int64, error)
+	CreateDislike(context.Context, int64, int64) error
+	CreateBlock(context.Context, int64, int64) error
+	RemoveBlock(context.Context, int64, int64) error
+	CreateReport(context.Context, int64, int64, int16, *string) error
 }
 
 type profileStore interface {
@@ -75,7 +85,12 @@ type FeedItem struct {
 	Bio        string  `json:"bio"`
 	City       *string `json:"city,omitempty"`
 	IsVerified bool    `json:"is_verified"`
-	DistanceKM float64 `json:"distance_km"`
+	DistanceKM float64 `json:"distance_km,omitempty"`
+}
+
+type LikeOutput struct {
+	Matched bool   `json:"matched"`
+	ChatID  *int64 `json:"chat_id,omitempty"`
 }
 
 type TargetInput struct {
@@ -148,17 +163,7 @@ func (s *RibbonService) GetFeed(ctx context.Context, userID int64, input FeedInp
 				continue
 			}
 
-			items = append(items, FeedItem{
-				ProfileID:  candidate.Profile.ID,
-				UserID:     candidate.Profile.UserID,
-				FullName:   candidate.Profile.FullName,
-				Birthday:   candidate.Profile.Birthday.Format("2006-01-02"),
-				Gender:     candidate.Profile.Gender,
-				Bio:        candidate.Profile.Bio,
-				City:       candidate.Profile.City,
-				IsVerified: candidate.IsVerified,
-				DistanceKM: roundDistance(distanceKM),
-			})
+			items = append(items, feedItemFromCandidate(candidate, distanceKM))
 			if len(items) == limit {
 				break
 			}
@@ -176,34 +181,87 @@ func (s *RibbonService) GetFeed(ctx context.Context, userID int64, input FeedInp
 	return output, nil
 }
 
-// GetIncomingLikes will return people who liked the current user.
-func (s *RibbonService) GetIncomingLikes(context.Context, int64) (FeedOutput, error) {
-	return FeedOutput{}, ErrNotImplemented
+// GetIncomingLikes returns active, non-excluded profiles that have liked the
+// current user. It does not apply discovery preferences: an incoming like is
+// an explicit action, not a feed recommendation.
+func (s *RibbonService) GetIncomingLikes(ctx context.Context, userID int64, input FeedInput) (FeedOutput, error) {
+	limit, err := normalizeFeedLimit(input.Limit)
+	if err != nil {
+		return FeedOutput{}, err
+	}
+	afterProfileID, err := parseCursor(input.Cursor)
+	if err != nil {
+		return FeedOutput{}, err
+	}
+
+	candidates, err := s.ribbonRepository.ListIncomingLikes(ctx, userID, afterProfileID, limit+1)
+	if err != nil {
+		return FeedOutput{}, err
+	}
+	output := FeedOutput{Items: make([]FeedItem, 0, min(limit, len(candidates)))}
+	for index, candidate := range candidates {
+		if index == limit {
+			output.NextCursor = strconv.FormatInt(output.Items[len(output.Items)-1].ProfileID, 10)
+			break
+		}
+		output.Items = append(output.Items, feedItemFromCandidate(candidate, 0))
+	}
+	return output, nil
 }
 
 // Like will persist a like and, when appropriate, create a match/chat.
-func (s *RibbonService) Like(context.Context, int64, TargetInput) error {
-	return ErrNotImplemented
+func (s *RibbonService) Like(ctx context.Context, userID int64, input TargetInput) (LikeOutput, error) {
+	if err := validateTarget(userID, input.TargetUserID); err != nil {
+		return LikeOutput{}, err
+	}
+	chatID, err := s.ribbonRepository.CreateLike(ctx, userID, input.TargetUserID)
+	if err != nil {
+		return LikeOutput{}, err
+	}
+	return LikeOutput{Matched: chatID != nil, ChatID: chatID}, nil
 }
 
 // Dislike will exclude a user from the current user's feed.
-func (s *RibbonService) Dislike(context.Context, int64, TargetInput) error {
-	return ErrNotImplemented
+func (s *RibbonService) Dislike(ctx context.Context, userID int64, input TargetInput) error {
+	if err := validateTarget(userID, input.TargetUserID); err != nil {
+		return err
+	}
+	return s.ribbonRepository.CreateDislike(ctx, userID, input.TargetUserID)
 }
 
 // Block will permanently exclude a user and deactivate their chat if needed.
-func (s *RibbonService) Block(context.Context, int64, TargetInput) error {
-	return ErrNotImplemented
+func (s *RibbonService) Block(ctx context.Context, userID int64, input TargetInput) error {
+	if err := validateTarget(userID, input.TargetUserID); err != nil {
+		return err
+	}
+	return s.ribbonRepository.CreateBlock(ctx, userID, input.TargetUserID)
 }
 
 // Unblock will remove a permanent feed exclusion.
-func (s *RibbonService) Unblock(context.Context, int64, TargetInput) error {
-	return ErrNotImplemented
+func (s *RibbonService) Unblock(ctx context.Context, userID int64, input TargetInput) error {
+	if err := validateTarget(userID, input.TargetUserID); err != nil {
+		return err
+	}
+	return s.ribbonRepository.RemoveBlock(ctx, userID, input.TargetUserID)
 }
 
 // Report will store a complaint and later publish an analytics/moderation event.
-func (s *RibbonService) Report(context.Context, int64, ReportInput) error {
-	return ErrNotImplemented
+func (s *RibbonService) Report(ctx context.Context, userID int64, input ReportInput) error {
+	if err := validateTarget(userID, input.TargetUserID); err != nil {
+		return err
+	}
+	if input.Reason < 1 || input.Reason > 5 {
+		return ErrInvalidReportReason
+	}
+	comment := strings.TrimSpace(input.Comment)
+	if len(comment) > 2000 {
+		return ErrReportCommentTooLong
+	}
+	var commentPointer *string
+	if comment != "" {
+		commentPointer = &comment
+	}
+	return s.ribbonRepository.CreateReport(ctx, userID, input.TargetUserID, input.Reason, commentPointer)
 }
 
 func normalizeFeedLimit(limit int) (int, error) {
@@ -211,7 +269,7 @@ func normalizeFeedLimit(limit int) (int, error) {
 		return defaultFeedLimit, nil
 	}
 	if limit < 0 || limit > maximumFeedLimit {
-		return 0, ErrInvalidFeedCursor
+		return 0, ErrInvalidFeedLimit
 	}
 	return limit, nil
 }
@@ -229,4 +287,32 @@ func parseCursor(cursor string) (int64, error) {
 
 func roundDistance(distance float64) float64 {
 	return float64(int(distance*100+0.5)) / 100
+}
+
+func feedItemFromCandidate(candidate models.DiscoveryCandidate, distanceKM float64) FeedItem {
+	return FeedItem{
+		ProfileID:  candidate.Profile.ID,
+		UserID:     candidate.Profile.UserID,
+		FullName:   candidate.Profile.FullName,
+		Birthday:   candidate.Profile.Birthday.Format("2006-01-02"),
+		Gender:     candidate.Profile.Gender,
+		Bio:        candidate.Profile.Bio,
+		City:       candidate.Profile.City,
+		IsVerified: candidate.IsVerified,
+		DistanceKM: roundDistance(distanceKM),
+	}
+}
+
+func validateTarget(userID, targetUserID int64) error {
+	if targetUserID <= 0 || targetUserID == userID {
+		return ErrInvalidTargetUser
+	}
+	return nil
+}
+
+func min(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
