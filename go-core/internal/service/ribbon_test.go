@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"tinder-core/internal/events"
 	"tinder-core/internal/models"
 	"tinder-core/internal/repository"
 )
@@ -22,7 +23,7 @@ func TestGetFeed_FiltersExactDistanceAfterSQLBounds(t *testing.T) {
 		}},
 	}
 	profiles := &fakeProfileStore{profile: &models.Profile{Latitude: &viewerLat, Longitude: &viewerLon}}
-	service := NewRibbonService(store, profiles, nil)
+	service := NewRibbonService(store, profiles, nil, nil)
 
 	output, err := service.GetFeed(context.Background(), 1, FeedInput{Limit: 2})
 	if err != nil {
@@ -47,6 +48,7 @@ func TestGetFeed_RequiresProfileCoordinates(t *testing.T) {
 		&fakeRibbonStore{filters: &models.DiscoveryPreferences{MaxDistanceKM: 20}},
 		&fakeProfileStore{profile: &models.Profile{}},
 		nil,
+		nil,
 	)
 
 	_, err := service.GetFeed(context.Background(), 1, FeedInput{Limit: 1})
@@ -56,7 +58,7 @@ func TestGetFeed_RequiresProfileCoordinates(t *testing.T) {
 }
 
 func TestGetFeed_RejectsInvalidCursor(t *testing.T) {
-	service := NewRibbonService(&fakeRibbonStore{}, &fakeProfileStore{}, nil)
+	service := NewRibbonService(&fakeRibbonStore{}, &fakeProfileStore{}, nil, nil)
 	_, err := service.GetFeed(context.Background(), 1, FeedInput{Limit: 1, Cursor: "not-an-id"})
 	if !errors.Is(err, ErrInvalidFeedCursor) {
 		t.Fatalf("error = %v, want ErrInvalidFeedCursor", err)
@@ -66,7 +68,7 @@ func TestGetFeed_RejectsInvalidCursor(t *testing.T) {
 func TestLike_ReturnsMatchWhenRepositoryCreatesChat(t *testing.T) {
 	chatID := int64(42)
 	store := &fakeRibbonStore{likeChatID: &chatID}
-	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+	service := NewRibbonService(store, &fakeProfileStore{}, nil, nil)
 
 	output, err := service.Like(context.Background(), 1, TargetInput{TargetUserID: 2})
 	if err != nil {
@@ -80,9 +82,26 @@ func TestLike_ReturnsMatchWhenRepositoryCreatesChat(t *testing.T) {
 	}
 }
 
+func TestLike_PublishesSwipeAndMatchEvents(t *testing.T) {
+	chatID := int64(42)
+	store := &fakeRibbonStore{likeChatID: &chatID}
+	publisher := &fakeEventPublisher{}
+	service := NewRibbonService(store, &fakeProfileStore{}, publisher, nil)
+
+	if _, err := service.Like(context.Background(), 1, TargetInput{TargetUserID: 2}); err != nil {
+		t.Fatalf("Like returned error: %v", err)
+	}
+	if len(publisher.events) != 2 || publisher.events[0].Type != "swipe" || publisher.events[1].Type != "match" {
+		t.Fatalf("unexpected published events: %#v", publisher.events)
+	}
+	if publisher.events[0].Payload["user_id"] != int64(1) || publisher.events[0].Payload["target_user_id"] != int64(2) {
+		t.Fatalf("unexpected swipe payload: %#v", publisher.events[0].Payload)
+	}
+}
+
 func TestRibbonActions_RejectSelfTargetBeforeRepository(t *testing.T) {
 	store := &fakeRibbonStore{}
-	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+	service := NewRibbonService(store, &fakeProfileStore{}, nil, nil)
 
 	_, err := service.Like(context.Background(), 1, TargetInput{TargetUserID: 1})
 	if !errors.Is(err, ErrInvalidTargetUser) {
@@ -95,7 +114,7 @@ func TestRibbonActions_RejectSelfTargetBeforeRepository(t *testing.T) {
 
 func TestReport_ValidatesAndTrimsComment(t *testing.T) {
 	store := &fakeRibbonStore{}
-	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+	service := NewRibbonService(store, &fakeProfileStore{}, nil, nil)
 
 	err := service.Report(context.Background(), 1, ReportInput{
 		TargetUserID: 2,
@@ -117,7 +136,7 @@ func TestReport_ValidatesAndTrimsComment(t *testing.T) {
 
 func TestSavePreferences_NormalizesOptionalCity(t *testing.T) {
 	store := &fakeRibbonStore{}
-	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+	service := NewRibbonService(store, &fakeProfileStore{}, nil, nil)
 	city := "  Москва "
 	gender := int16(2)
 
@@ -138,7 +157,7 @@ func TestSavePreferences_NormalizesOptionalCity(t *testing.T) {
 }
 
 func TestSavePreferences_RejectsInvalidRange(t *testing.T) {
-	service := NewRibbonService(&fakeRibbonStore{}, &fakeProfileStore{}, nil)
+	service := NewRibbonService(&fakeRibbonStore{}, &fakeProfileStore{}, nil, nil)
 	_, err := service.SavePreferences(context.Background(), 7, SavePreferencesInput{
 		MinAge: 30, MaxAge: 20, MaxDistanceKM: 10,
 	})
@@ -209,6 +228,14 @@ type fakeProfileStore struct {
 
 func (s *fakeProfileStore) GetByUserID(context.Context, int64) (*models.Profile, error) {
 	return s.profile, s.err
+}
+
+type fakeEventPublisher struct {
+	events []events.Event
+}
+
+func (p *fakeEventPublisher) Publish(event events.Event) {
+	p.events = append(p.events, event)
 }
 
 func candidate(profileID, userID int64, latitude, longitude float64) models.DiscoveryCandidate {

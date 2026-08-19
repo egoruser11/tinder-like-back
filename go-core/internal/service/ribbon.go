@@ -7,7 +7,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
+	"tinder-core/internal/events"
 	"tinder-core/internal/geo"
 	"tinder-core/internal/models"
 	"tinder-core/internal/repository"
@@ -47,22 +49,29 @@ type profileReader interface {
 	GetByUserID(context.Context, int64) (*models.Profile, error)
 }
 
+type eventPublisher interface {
+	Publish(events.Event)
+}
+
 // RibbonService owns discovery operations: feed, likes, dislikes, blocks,
 // reports, preferences, and match creation.
 type RibbonService struct {
 	ribbonRepository  ribbonStore
 	profileRepository profileReader
+	publisher         eventPublisher
 	logger            *slog.Logger
 }
 
 func NewRibbonService(
 	ribbonRepository ribbonStore,
 	profileRepository profileReader,
+	publisher eventPublisher,
 	logger *slog.Logger,
 ) *RibbonService {
 	return &RibbonService{
 		ribbonRepository:  ribbonRepository,
 		profileRepository: profileRepository,
+		publisher:         publisher,
 		logger:            logger,
 	}
 }
@@ -241,6 +250,10 @@ func (s *RibbonService) Like(ctx context.Context, userID int64, input TargetInpu
 	if err != nil {
 		return LikeOutput{}, err
 	}
+	s.publish("swipe", userID, input.TargetUserID, map[string]any{"liked": true})
+	if chatID != nil {
+		s.publish("match", userID, input.TargetUserID, map[string]any{"chat_id": *chatID})
+	}
 	return LikeOutput{Matched: chatID != nil, ChatID: chatID}, nil
 }
 
@@ -249,7 +262,11 @@ func (s *RibbonService) Dislike(ctx context.Context, userID int64, input TargetI
 	if err := validateTarget(userID, input.TargetUserID); err != nil {
 		return err
 	}
-	return s.ribbonRepository.CreateDislike(ctx, userID, input.TargetUserID)
+	if err := s.ribbonRepository.CreateDislike(ctx, userID, input.TargetUserID); err != nil {
+		return err
+	}
+	s.publish("swipe", userID, input.TargetUserID, map[string]any{"liked": false})
+	return nil
 }
 
 // Block will permanently exclude a user and deactivate their chat if needed.
@@ -257,7 +274,11 @@ func (s *RibbonService) Block(ctx context.Context, userID int64, input TargetInp
 	if err := validateTarget(userID, input.TargetUserID); err != nil {
 		return err
 	}
-	return s.ribbonRepository.CreateBlock(ctx, userID, input.TargetUserID)
+	if err := s.ribbonRepository.CreateBlock(ctx, userID, input.TargetUserID); err != nil {
+		return err
+	}
+	s.publish("block", userID, input.TargetUserID, nil)
+	return nil
 }
 
 // Unblock will remove a permanent feed exclusion.
@@ -284,7 +305,11 @@ func (s *RibbonService) Report(ctx context.Context, userID int64, input ReportIn
 	if comment != "" {
 		commentPointer = &comment
 	}
-	return s.ribbonRepository.CreateReport(ctx, userID, input.TargetUserID, input.Reason, commentPointer)
+	if err := s.ribbonRepository.CreateReport(ctx, userID, input.TargetUserID, input.Reason, commentPointer); err != nil {
+		return err
+	}
+	s.publish("report", userID, input.TargetUserID, map[string]any{"reason": input.Reason})
+	return nil
 }
 
 func normalizeFeedLimit(limit int) (int, error) {
@@ -367,4 +392,17 @@ func buildPreferences(userID int64, input SavePreferencesInput) (models.Discover
 		IsVerified:    input.IsVerified,
 		MaxDistanceKM: input.MaxDistanceKM,
 	}, nil
+}
+
+func (s *RibbonService) publish(eventType string, userID, targetUserID int64, payload map[string]any) {
+	if s.publisher == nil {
+		return
+	}
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+	payload["user_id"] = userID
+	payload["target_user_id"] = targetUserID
+	payload["occurred_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	s.publisher.Publish(events.Event{Type: eventType, Payload: payload})
 }

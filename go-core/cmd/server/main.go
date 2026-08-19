@@ -56,7 +56,6 @@ func main() {
 	chatRepository := repository.NewChatRepository(db)
 	photoRepository := repository.NewPhotoRepository(db)
 	profileService := service.NewProfileService(profileRepository)
-	ribbonService := service.NewRibbonService(ribbonRepository, profileRepository, logger)
 	chatService := service.NewChatService(chatRepository)
 	authStore := postgres.NewAuthStore(db, userRepository)
 	authenticator, err := basic.NewAuthenticator(basic.Config{
@@ -79,7 +78,6 @@ func main() {
 	}
 	authHandler := handlers.NewAuthHandler(authenticator, tokenManager, logger)
 	profileHandler := handlers.NewProfileHandler(profileService)
-	ribbonHandler := handlers.NewRibbonHandler(ribbonService, ribbonRepository)
 	chatHandler := handlers.NewChatHandler(chatService)
 
 	storageCtx, cancelStorage := context.WithTimeout(ctx, 10*time.Second)
@@ -110,6 +108,8 @@ func main() {
 	publisher := events.NewPublisher(redisClient, cfg.RedisStream, cfg.PublisherPool, 256)
 	publisher.Start(ctx, cfg.PublisherPool)
 	defer publisher.Close()
+	ribbonService := service.NewRibbonService(ribbonRepository, profileRepository, publisher, logger)
+	ribbonHandler := handlers.NewRibbonHandler(ribbonService, ribbonRepository)
 
 	router := httptransport.NewRouter(httptransport.Deps{
 		Publisher:      publisher,
