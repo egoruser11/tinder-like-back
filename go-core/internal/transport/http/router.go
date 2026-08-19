@@ -64,14 +64,6 @@ func NewRouter(deps Deps) *gin.Engine {
 		chats.POST("/:chat_id/messages", deps.ChatHandler.Send)
 		chats.POST("/:chat_id/read", deps.ChatHandler.MarkRead)
 
-		feed := v1.Group("/feed")
-		_ = feed // TODO(ticket-6): GET /feed (candidate stack, cached in Redis)
-
-		swipes := v1.Group("/swipes")
-		_ = swipes // TODO(ticket-5): POST /swipes (like/pass -> match detection -> events.Publish)
-
-		matches := v1.Group("/matches")
-		_ = matches // TODO(ticket-5): GET /matches
 	}
 
 	return r

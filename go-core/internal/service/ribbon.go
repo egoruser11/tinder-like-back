@@ -13,10 +13,7 @@ import (
 	"tinder-core/internal/repository"
 )
 
-// ErrNotImplemented marks endpoints whose domain algorithm is deliberately
-// left for the application author to implement.
 var (
-	ErrNotImplemented             = errors.New("ribbon operation is not implemented")
 	ErrInvalidFeedCursor          = errors.New("invalid feed cursor")
 	ErrInvalidFeedLimit           = errors.New("invalid feed limit")
 	ErrProfileCoordinatesRequired = errors.New("profile coordinates are required")
@@ -50,9 +47,8 @@ type profileReader interface {
 	GetByUserID(context.Context, int64) (*models.Profile, error)
 }
 
-// RibbonService is the home for all discovery-domain operations: feed,
-// likes, dislikes, blocks, reports, and later matches. It has database access
-// available, but contains no selection or ranking algorithm yet.
+// RibbonService owns discovery operations: feed, likes, dislikes, blocks,
+// reports, preferences, and match creation.
 type RibbonService struct {
 	ribbonRepository  ribbonStore
 	profileRepository profileReader

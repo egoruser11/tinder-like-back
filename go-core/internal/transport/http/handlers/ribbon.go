@@ -118,9 +118,6 @@ func bindJSON(c *gin.Context, value any) bool {
 
 func (h *RibbonHandler) respond(c *gin.Context, result any, err error) {
 	switch {
-	case errors.Is(err, service.ErrNotImplemented):
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "ribbon algorithm is not implemented yet"})
-		return
 	case errors.Is(err, service.ErrInvalidFeedCursor),
 		errors.Is(err, service.ErrInvalidFeedLimit),
 		errors.Is(err, service.ErrInvalidTargetUser),
