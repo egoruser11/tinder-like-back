@@ -41,7 +41,7 @@ type ribbonStore interface {
 	CreateReport(context.Context, int64, int64, int16, *string) error
 }
 
-type profileStore interface {
+type profileReader interface {
 	GetByUserID(context.Context, int64) (*models.Profile, error)
 }
 
@@ -50,13 +50,13 @@ type profileStore interface {
 // available, but contains no selection or ranking algorithm yet.
 type RibbonService struct {
 	ribbonRepository  ribbonStore
-	profileRepository profileStore
+	profileRepository profileReader
 	logger            *slog.Logger
 }
 
 func NewRibbonService(
 	ribbonRepository ribbonStore,
-	profileRepository profileStore,
+	profileRepository profileReader,
 	logger *slog.Logger,
 ) *RibbonService {
 	return &RibbonService{

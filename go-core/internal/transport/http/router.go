@@ -13,12 +13,13 @@ import (
 )
 
 type Deps struct {
-	Publisher     *events.Publisher
-	Authenticator *basic.Authenticator
-	TokenManager  *authjwt.TokenManager
-	Logger        *slog.Logger
-	AuthHandler   *handlers.AuthHandler
-	RibbonHandler *handlers.RibbonHandler
+	Publisher      *events.Publisher
+	Authenticator  *basic.Authenticator
+	TokenManager   *authjwt.TokenManager
+	Logger         *slog.Logger
+	AuthHandler    *handlers.AuthHandler
+	RibbonHandler  *handlers.RibbonHandler
+	ProfileHandler *handlers.ProfileHandler
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -45,8 +46,10 @@ func NewRouter(deps Deps) *gin.Engine {
 		ribbon.DELETE("/blocks", deps.RibbonHandler.Unblock)
 		ribbon.POST("/reports", deps.RibbonHandler.Report)
 
-		profiles := v1.Group("/profiles")
-		_ = profiles // TODO(ticket-4): GET/PUT /profiles/me, POST /profiles/me/photos
+		profiles := protected.Group("/profiles")
+		profiles.GET("/me", deps.ProfileHandler.Me)
+		profiles.PUT("/me", deps.ProfileHandler.SaveMe)
+		profiles.DELETE("/me", deps.ProfileHandler.DeleteMe)
 
 		feed := v1.Group("/feed")
 		_ = feed // TODO(ticket-6): GET /feed (candidate stack, cached in Redis)

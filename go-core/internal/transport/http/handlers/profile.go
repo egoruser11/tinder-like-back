@@ -1,48 +1,74 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"tinder-core/internal/repository"
+	"tinder-core/internal/service"
+	transportmiddleware "tinder-core/internal/transport/http/middleware"
 )
 
-var ErrProfileNotFound = errors.New("profile not found")
-
-// ProfileDeactivator — минимальный контракт handler-а с репозиторием.
-// Реализация появится в internal/repository в рамках тикета 2.
-type ProfileDeactivator interface {
-	Deactivate(ctx context.Context, userID int64) error
-}
-
-// ProfileHandler содержит зависимости HTTP-слоя.
-// Handler не должен сам выполнять SQL-запросы.
+// ProfileHandler owns the HTTP contract for the current user's profile.
 type ProfileHandler struct {
-	profiles ProfileDeactivator
+	service *service.ProfileService
 }
 
-func NewProfileHandler(profiles ProfileDeactivator) *ProfileHandler {
-	return &ProfileHandler{profiles: profiles}
+func NewProfileHandler(service *service.ProfileService) *ProfileHandler {
+	return &ProfileHandler{service: service}
 }
 
-// DeleteMe — пример handler-а мягкого удаления профиля.
-// auth middleware из тикета 3 должен положить идентификатор пользователя
-// в контекст Gin под ключом "user_id".
-func (h *ProfileHandler) DeleteMe(c *gin.Context) {
-	userID := c.GetInt64("user_id")
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+func (h *ProfileHandler) Me(c *gin.Context) {
+	profile, err := h.service.Get(c.Request.Context(), currentProfileUserID(c))
+	if err != nil {
+		h.respond(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, profile)
+}
+
+func (h *ProfileHandler) SaveMe(c *gin.Context) {
+	var input service.SaveProfileInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid profile body"})
 		return
 	}
 
-	err := h.profiles.Deactivate(c.Request.Context(), userID)
+	profile, err := h.service.Save(c.Request.Context(), currentProfileUserID(c), input)
+	if err != nil {
+		h.respond(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, profile)
+}
+
+func (h *ProfileHandler) DeleteMe(c *gin.Context) {
+	err := h.service.Deactivate(c.Request.Context(), currentProfileUserID(c))
+	if err != nil {
+		h.respond(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func currentProfileUserID(c *gin.Context) int64 {
+	return c.GetInt64(transportmiddleware.UserIDKey)
+}
+
+func (h *ProfileHandler) respond(c *gin.Context, err error) {
 	switch {
-	case err == nil:
-		c.Status(http.StatusNoContent)
-	case errors.Is(err, ErrProfileNotFound):
-		c.JSON(http.StatusNotFound, map[string]string{"error": "profile not found"})
+	case errors.Is(err, repository.ErrProfileNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrProfileNameRequired),
+		errors.Is(err, service.ErrInvalidProfileBirthday),
+		errors.Is(err, service.ErrProfileOwnerMustBeAdult),
+		errors.Is(err, service.ErrInvalidProfileGender),
+		errors.Is(err, service.ErrCoordinatesMustBeTogether),
+		errors.Is(err, service.ErrInvalidProfileCoordinates):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not delete profile"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "profile operation failed"})
 	}
 }

@@ -53,6 +53,7 @@ func main() {
 	userRepository := repository.NewUserRepository(db)
 	profileRepository := repository.NewProfileRepository(db)
 	ribbonRepository := repository.NewRibbonRepository(db)
+	profileService := service.NewProfileService(profileRepository)
 	ribbonService := service.NewRibbonService(ribbonRepository, profileRepository, logger)
 	authStore := postgres.NewAuthStore(db, userRepository)
 	authenticator, err := basic.NewAuthenticator(basic.Config{
@@ -74,6 +75,7 @@ func main() {
 		os.Exit(1)
 	}
 	authHandler := handlers.NewAuthHandler(authenticator, tokenManager, logger)
+	profileHandler := handlers.NewProfileHandler(profileService)
 	ribbonHandler := handlers.NewRibbonHandler(ribbonService, ribbonRepository)
 
 	storageCtx, cancelStorage := context.WithTimeout(ctx, 10*time.Second)
@@ -104,12 +106,13 @@ func main() {
 	defer publisher.Close()
 
 	router := httptransport.NewRouter(httptransport.Deps{
-		Publisher:     publisher,
-		Authenticator: authenticator,
-		TokenManager:  tokenManager,
-		Logger:        logger,
-		AuthHandler:   authHandler,
-		RibbonHandler: ribbonHandler,
+		Publisher:      publisher,
+		Authenticator:  authenticator,
+		TokenManager:   tokenManager,
+		Logger:         logger,
+		AuthHandler:    authHandler,
+		RibbonHandler:  ribbonHandler,
+		ProfileHandler: profileHandler,
 	})
 
 	srv := &http.Server{
