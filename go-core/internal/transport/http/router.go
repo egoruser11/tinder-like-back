@@ -21,6 +21,7 @@ type Deps struct {
 	RibbonHandler  *handlers.RibbonHandler
 	ProfileHandler *handlers.ProfileHandler
 	ChatHandler    *handlers.ChatHandler
+	PhotoHandler   *handlers.PhotoHandler
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -53,6 +54,9 @@ func NewRouter(deps Deps) *gin.Engine {
 		profiles.GET("/me", deps.ProfileHandler.Me)
 		profiles.PUT("/me", deps.ProfileHandler.SaveMe)
 		profiles.DELETE("/me", deps.ProfileHandler.DeleteMe)
+		profiles.GET("/me/photos", deps.PhotoHandler.ListMe)
+		profiles.POST("/me/photos", deps.PhotoHandler.UploadMe)
+		profiles.DELETE("/me/photos/:photo_id", deps.PhotoHandler.DeleteMe)
 
 		chats := protected.Group("/chats")
 		chats.GET("", deps.ChatHandler.List)

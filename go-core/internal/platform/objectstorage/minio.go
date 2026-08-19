@@ -3,6 +3,7 @@ package objectstorage
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -66,4 +67,21 @@ func ensureBucket(ctx context.Context, client *minio.Client, bucket string) erro
 
 func (c *Client) Bucket() string {
 	return c.bucket
+}
+
+func (c *Client) Put(ctx context.Context, objectKey, contentType string, size int64, reader io.Reader) error {
+	_, err := c.client.PutObject(ctx, c.bucket, objectKey, reader, size, minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	if err != nil {
+		return fmt.Errorf("put object %q: %w", objectKey, err)
+	}
+	return nil
+}
+
+func (c *Client) Delete(ctx context.Context, objectKey string) error {
+	if err := c.client.RemoveObject(ctx, c.bucket, objectKey, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("remove object %q: %w", objectKey, err)
+	}
+	return nil
 }

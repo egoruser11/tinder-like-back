@@ -54,6 +54,7 @@ func main() {
 	profileRepository := repository.NewProfileRepository(db)
 	ribbonRepository := repository.NewRibbonRepository(db)
 	chatRepository := repository.NewChatRepository(db)
+	photoRepository := repository.NewPhotoRepository(db)
 	profileService := service.NewProfileService(profileRepository)
 	ribbonService := service.NewRibbonService(ribbonRepository, profileRepository, logger)
 	chatService := service.NewChatService(chatRepository)
@@ -96,6 +97,8 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("photo storage ready", "bucket", photoStorage.Bucket())
+	photoService := service.NewPhotoService(photoRepository, photoStorage)
+	photoHandler := handlers.NewPhotoHandler(photoService)
 
 	redisClient, err := redis.New(cfg.RedisAddr)
 	if err != nil {
@@ -117,6 +120,7 @@ func main() {
 		RibbonHandler:  ribbonHandler,
 		ProfileHandler: profileHandler,
 		ChatHandler:    chatHandler,
+		PhotoHandler:   photoHandler,
 	})
 
 	srv := &http.Server{
