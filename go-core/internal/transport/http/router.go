@@ -20,6 +20,7 @@ type Deps struct {
 	AuthHandler    *handlers.AuthHandler
 	RibbonHandler  *handlers.RibbonHandler
 	ProfileHandler *handlers.ProfileHandler
+	ChatHandler    *handlers.ChatHandler
 }
 
 func NewRouter(deps Deps) *gin.Engine {
@@ -52,6 +53,12 @@ func NewRouter(deps Deps) *gin.Engine {
 		profiles.GET("/me", deps.ProfileHandler.Me)
 		profiles.PUT("/me", deps.ProfileHandler.SaveMe)
 		profiles.DELETE("/me", deps.ProfileHandler.DeleteMe)
+
+		chats := protected.Group("/chats")
+		chats.GET("", deps.ChatHandler.List)
+		chats.GET("/:chat_id/messages", deps.ChatHandler.Messages)
+		chats.POST("/:chat_id/messages", deps.ChatHandler.Send)
+		chats.POST("/:chat_id/read", deps.ChatHandler.MarkRead)
 
 		feed := v1.Group("/feed")
 		_ = feed // TODO(ticket-6): GET /feed (candidate stack, cached in Redis)

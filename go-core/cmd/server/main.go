@@ -53,8 +53,10 @@ func main() {
 	userRepository := repository.NewUserRepository(db)
 	profileRepository := repository.NewProfileRepository(db)
 	ribbonRepository := repository.NewRibbonRepository(db)
+	chatRepository := repository.NewChatRepository(db)
 	profileService := service.NewProfileService(profileRepository)
 	ribbonService := service.NewRibbonService(ribbonRepository, profileRepository, logger)
+	chatService := service.NewChatService(chatRepository)
 	authStore := postgres.NewAuthStore(db, userRepository)
 	authenticator, err := basic.NewAuthenticator(basic.Config{
 		UserStore:       authStore,
@@ -77,6 +79,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(authenticator, tokenManager, logger)
 	profileHandler := handlers.NewProfileHandler(profileService)
 	ribbonHandler := handlers.NewRibbonHandler(ribbonService, ribbonRepository)
+	chatHandler := handlers.NewChatHandler(chatService)
 
 	storageCtx, cancelStorage := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelStorage()
@@ -113,6 +116,7 @@ func main() {
 		AuthHandler:    authHandler,
 		RibbonHandler:  ribbonHandler,
 		ProfileHandler: profileHandler,
+		ChatHandler:    chatHandler,
 	})
 
 	srv := &http.Server{
