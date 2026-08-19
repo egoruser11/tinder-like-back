@@ -115,6 +115,38 @@ func TestReport_ValidatesAndTrimsComment(t *testing.T) {
 	}
 }
 
+func TestSavePreferences_NormalizesOptionalCity(t *testing.T) {
+	store := &fakeRibbonStore{}
+	service := NewRibbonService(store, &fakeProfileStore{}, nil)
+	city := "  Москва "
+	gender := int16(2)
+
+	_, err := service.SavePreferences(context.Background(), 7, SavePreferencesInput{
+		City:          &city,
+		MinAge:        20,
+		MaxAge:        35,
+		Gender:        &gender,
+		IsVerified:    true,
+		MaxDistanceKM: 70,
+	})
+	if err != nil {
+		t.Fatalf("SavePreferences returned error: %v", err)
+	}
+	if store.savedPreferences.UserID != 7 || store.savedPreferences.City == nil || *store.savedPreferences.City != "Москва" {
+		t.Fatalf("unexpected saved preferences: %#v", store.savedPreferences)
+	}
+}
+
+func TestSavePreferences_RejectsInvalidRange(t *testing.T) {
+	service := NewRibbonService(&fakeRibbonStore{}, &fakeProfileStore{}, nil)
+	_, err := service.SavePreferences(context.Background(), 7, SavePreferencesInput{
+		MinAge: 30, MaxAge: 20, MaxDistanceKM: 10,
+	})
+	if !errors.Is(err, ErrInvalidDiscoveryAge) {
+		t.Fatalf("error = %v, want ErrInvalidDiscoveryAge", err)
+	}
+}
+
 type fakeRibbonStore struct {
 	filters          *models.DiscoveryPreferences
 	filtersErr       error
@@ -126,10 +158,16 @@ type fakeRibbonStore struct {
 	likedTargetID    int64
 	reportReason     int16
 	reportComment    *string
+	savedPreferences models.DiscoveryPreferences
 }
 
 func (s *fakeRibbonStore) GetFilters(context.Context, int64) (*models.DiscoveryPreferences, error) {
 	return s.filters, s.filtersErr
+}
+
+func (s *fakeRibbonStore) UpsertFilters(_ context.Context, preferences models.DiscoveryPreferences) (*models.DiscoveryPreferences, error) {
+	s.savedPreferences = preferences
+	return &preferences, nil
 }
 
 func (s *fakeRibbonStore) ListCandidates(_ context.Context, query repository.CandidateQuery) ([]models.DiscoveryCandidate, error) {

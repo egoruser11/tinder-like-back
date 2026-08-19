@@ -41,6 +41,28 @@ func (h *RibbonHandler) IncomingLikes(c *gin.Context) {
 	h.respond(c, result, err)
 }
 
+func (h *RibbonHandler) Preferences(c *gin.Context) {
+	preferences, err := h.service.GetPreferences(c.Request.Context(), currentUserID(c))
+	if err != nil {
+		h.respond(c, nil, err)
+		return
+	}
+	c.JSON(http.StatusOK, preferences)
+}
+
+func (h *RibbonHandler) SavePreferences(c *gin.Context) {
+	var input service.SavePreferencesInput
+	if !bindJSON(c, &input) {
+		return
+	}
+	preferences, err := h.service.SavePreferences(c.Request.Context(), currentUserID(c), input)
+	if err != nil {
+		h.respond(c, nil, err)
+		return
+	}
+	c.JSON(http.StatusOK, preferences)
+}
+
 func (h *RibbonHandler) Like(c *gin.Context) {
 	var input service.TargetInput
 	if !bindJSON(c, &input) {
@@ -103,7 +125,10 @@ func (h *RibbonHandler) respond(c *gin.Context, result any, err error) {
 		errors.Is(err, service.ErrInvalidFeedLimit),
 		errors.Is(err, service.ErrInvalidTargetUser),
 		errors.Is(err, service.ErrInvalidReportReason),
-		errors.Is(err, service.ErrReportCommentTooLong):
+		errors.Is(err, service.ErrReportCommentTooLong),
+		errors.Is(err, service.ErrInvalidDiscoveryAge),
+		errors.Is(err, service.ErrInvalidDiscoveryGender),
+		errors.Is(err, service.ErrInvalidDiscoveryDistance):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	case errors.Is(err, repository.ErrTargetUserNotFound), errors.Is(err, repository.ErrProfileNotFound):

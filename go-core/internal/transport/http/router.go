@@ -40,6 +40,8 @@ func NewRouter(deps Deps) *gin.Engine {
 		ribbon := protected.Group("/ribbon")
 		ribbon.GET("", deps.RibbonHandler.Feed)
 		ribbon.GET("/likes", deps.RibbonHandler.IncomingLikes)
+		ribbon.GET("/preferences", deps.RibbonHandler.Preferences)
+		ribbon.PUT("/preferences", deps.RibbonHandler.SavePreferences)
 		ribbon.POST("/likes", deps.RibbonHandler.Like)
 		ribbon.POST("/dislikes", deps.RibbonHandler.Dislike)
 		ribbon.POST("/blocks", deps.RibbonHandler.Block)

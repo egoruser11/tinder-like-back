@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,9 @@ var (
 	ErrInvalidTargetUser          = errors.New("invalid target user")
 	ErrInvalidReportReason        = errors.New("invalid report reason")
 	ErrReportCommentTooLong       = errors.New("report comment is too long")
+	ErrInvalidDiscoveryAge        = errors.New("invalid discovery age range")
+	ErrInvalidDiscoveryGender     = errors.New("invalid discovery gender")
+	ErrInvalidDiscoveryDistance   = errors.New("invalid discovery distance")
 )
 
 const (
@@ -32,6 +36,7 @@ const (
 
 type ribbonStore interface {
 	GetFilters(context.Context, int64) (*models.DiscoveryPreferences, error)
+	UpsertFilters(context.Context, models.DiscoveryPreferences) (*models.DiscoveryPreferences, error)
 	ListCandidates(context.Context, repository.CandidateQuery) ([]models.DiscoveryCandidate, error)
 	ListIncomingLikes(context.Context, int64, int64, int) ([]models.DiscoveryCandidate, error)
 	CreateLike(context.Context, int64, int64) (*int64, error)
@@ -93,6 +98,15 @@ type LikeOutput struct {
 	ChatID  *int64 `json:"chat_id,omitempty"`
 }
 
+type SavePreferencesInput struct {
+	City          *string `json:"city"`
+	MinAge        int16   `json:"min_age"`
+	MaxAge        int16   `json:"max_age"`
+	Gender        *int16  `json:"gender"`
+	IsVerified    bool    `json:"is_verified"`
+	MaxDistanceKM int32   `json:"max_distance_km"`
+}
+
 type TargetInput struct {
 	TargetUserID int64 `json:"target_user_id"`
 }
@@ -128,7 +142,8 @@ func (s *RibbonService) GetFeed(ctx context.Context, userID int64, input FeedInp
 		return FeedOutput{}, ErrProfileCoordinatesRequired
 	}
 
-	bounds, err := geo.NewBounds(*profile.Latitude, *profile.Longitude, preliminarySearchRadiusKM)
+	boundsRadiusKM := math.Max(preliminarySearchRadiusKM, float64(filters.MaxDistanceKM))
+	bounds, err := geo.NewBounds(*profile.Latitude, *profile.Longitude, boundsRadiusKM)
 	if err != nil {
 		return FeedOutput{}, err
 	}
@@ -207,6 +222,18 @@ func (s *RibbonService) GetIncomingLikes(ctx context.Context, userID int64, inpu
 		output.Items = append(output.Items, feedItemFromCandidate(candidate, 0))
 	}
 	return output, nil
+}
+
+func (s *RibbonService) GetPreferences(ctx context.Context, userID int64) (*models.DiscoveryPreferences, error) {
+	return s.ribbonRepository.GetFilters(ctx, userID)
+}
+
+func (s *RibbonService) SavePreferences(ctx context.Context, userID int64, input SavePreferencesInput) (*models.DiscoveryPreferences, error) {
+	preferences, err := buildPreferences(userID, input)
+	if err != nil {
+		return nil, err
+	}
+	return s.ribbonRepository.UpsertFilters(ctx, preferences)
 }
 
 // Like will persist a like and, when appropriate, create a match/chat.
@@ -315,4 +342,33 @@ func min(left, right int) int {
 		return left
 	}
 	return right
+}
+
+func buildPreferences(userID int64, input SavePreferencesInput) (models.DiscoveryPreferences, error) {
+	if input.MinAge < 18 || input.MaxAge < input.MinAge || input.MaxAge > 99 {
+		return models.DiscoveryPreferences{}, ErrInvalidDiscoveryAge
+	}
+	if input.Gender != nil && *input.Gender != 1 && *input.Gender != 2 {
+		return models.DiscoveryPreferences{}, ErrInvalidDiscoveryGender
+	}
+	if input.MaxDistanceKM <= 0 || input.MaxDistanceKM > 1000 {
+		return models.DiscoveryPreferences{}, ErrInvalidDiscoveryDistance
+	}
+
+	var city *string
+	if input.City != nil {
+		value := strings.TrimSpace(*input.City)
+		if value != "" {
+			city = &value
+		}
+	}
+	return models.DiscoveryPreferences{
+		UserID:        userID,
+		City:          city,
+		MinAge:        input.MinAge,
+		MaxAge:        input.MaxAge,
+		Gender:        input.Gender,
+		IsVerified:    input.IsVerified,
+		MaxDistanceKM: input.MaxDistanceKM,
+	}, nil
 }

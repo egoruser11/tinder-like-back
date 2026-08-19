@@ -60,6 +60,47 @@ func (repo *RibbonRepository) GetFilters(ctx context.Context, userID int64) (*mo
 	return &filters, nil
 }
 
+// UpsertFilters saves the full set of discovery preferences for a user.
+func (repo *RibbonRepository) UpsertFilters(ctx context.Context, filters models.DiscoveryPreferences) (*models.DiscoveryPreferences, error) {
+	var saved models.DiscoveryPreferences
+	err := repo.db.QueryRow(ctx, `
+		INSERT INTO discovery_preferences (
+			user_id, city, min_age, max_age, gender, is_verified, max_distance_km
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (user_id) DO UPDATE SET
+			city = EXCLUDED.city,
+			min_age = EXCLUDED.min_age,
+			max_age = EXCLUDED.max_age,
+			gender = EXCLUDED.gender,
+			is_verified = EXCLUDED.is_verified,
+			max_distance_km = EXCLUDED.max_distance_km,
+			updated_at = now()
+		RETURNING user_id, city, min_age, max_age, gender, is_verified, max_distance_km, updated_at
+	`,
+		filters.UserID,
+		filters.City,
+		filters.MinAge,
+		filters.MaxAge,
+		filters.Gender,
+		filters.IsVerified,
+		filters.MaxDistanceKM,
+	).Scan(
+		&saved.UserID,
+		&saved.City,
+		&saved.MinAge,
+		&saved.MaxAge,
+		&saved.Gender,
+		&saved.IsVerified,
+		&saved.MaxDistanceKM,
+		&saved.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("upsert discovery preferences for user %d: %w", filters.UserID, err)
+	}
+	return &saved, nil
+}
+
 // CandidateQuery contains every already validated criterion for a feed query.
 // The SQL query additionally applies pair-wise exclusions and prior likes.
 type CandidateQuery struct {
